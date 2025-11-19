@@ -1,10 +1,11 @@
-﻿using UserService.Helper;
-using UserService.Services;
-using Microsoft.AspNetCore.Authentication.JwtBearer;
+﻿using Microsoft.AspNetCore.Authentication.JwtBearer;
+using Microsoft.EntityFrameworkCore;
 using Microsoft.IdentityModel.Tokens;
 using System.Text;
 using UserService.Context;
-using Microsoft.EntityFrameworkCore;
+using UserService.Helper;
+using UserService.Messaging;
+using UserService.Services;
 
 var builder = WebApplication.CreateBuilder(args);
 
@@ -16,6 +17,9 @@ builder.Services.AddDbContext<UserContext>(options =>
     options.UseSqlServer(builder.Configuration.GetConnectionString("DefaultConnection")));
 
 // Register services (DI) - MUST BE SCOPED
+
+builder.Services.AddScoped<IEmailService, EmailService>();
+builder.Services.AddSingleton<RabbitMqPublisher>();
 builder.Services.AddScoped<IUserServices, UserServices>();
 //builder.Services.AddScoped<IUserServices, EmailService>();
 builder.Services.AddSingleton<JwtToken>();
@@ -45,7 +49,8 @@ builder.Services.AddAuthentication(options =>
 });
 
 // Swagger
-builder.Services.AddSingleton<EmailService>();
+
+
 builder.Services.AddEndpointsApiExplorer();
 builder.Services.AddSwaggerGen();
 
