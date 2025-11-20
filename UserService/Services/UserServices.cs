@@ -60,6 +60,20 @@ namespace UserService.Services
         }
 
         // ================ VERIFY SIGNUP OTP =================
+        //public async Task<bool> VerifyOtp(string email, string otp)
+        //{
+        //    var user = await _db.Users.SingleOrDefaultAsync(x => x.Email == email);
+
+        //    if (user == null || user.EmailOtp != otp || user.OtpExpiry < DateTime.UtcNow)
+        //        return false;
+
+        //    user.EmailOtp = null;
+        //    user.OtpExpiry = null;
+        //    user.IsVerified = true;
+        //    await _db.SaveChangesAsync();
+
+        //    return true;
+        //}
         public async Task<bool> VerifyOtp(string email, string otp)
         {
             var user = await _db.Users.SingleOrDefaultAsync(x => x.Email == email);
@@ -71,6 +85,39 @@ namespace UserService.Services
             user.OtpExpiry = null;
             user.IsVerified = true;
             await _db.SaveChangesAsync();
+
+            // Send Welcome Email 🎉
+            await _email.SendEmail(
+                email,
+                "Welcome to E-Commerce App 🎉",
+                $@"
+        <div style='font-family: Arial; padding: 20px;'>
+            <h2 style='color:#4CAF50;'>Welcome, {user.FullName}! 🎉</h2>
+            <p>Thank you for joining <strong>E-Commerce App</strong>. Your account has been successfully verified.</p>
+
+            <p>You can now enjoy:</p>
+            <ul>
+                <li>✔ Fast product browsing</li>
+                <li>✔ Easy checkout</li>
+                <li>✔ Order tracking</li>
+                <li>✔ Exclusive member discounts</li>
+            </ul>
+
+            <p>We're excited to have you with us!</p>
+
+            <p style='margin-top:20px;'>Best Regards,<br/>
+            <strong>E-Commerce Team</strong></p>
+        </div>"
+            );
+
+            // Optional: Publish Welcome Event
+            _publisher.PublishEvent("user.welcome.sent", new
+            {
+                UserId = user.Id,
+                Email = user.Email,
+                FullName = user.FullName,
+                Time = DateTime.UtcNow
+            });
 
             return true;
         }
