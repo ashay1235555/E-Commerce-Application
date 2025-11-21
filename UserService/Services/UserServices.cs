@@ -18,7 +18,6 @@ namespace UserService.Services
             _publisher = publisher;
         }
 
-        // Generate 6 digit OTP
         private string GenerateOtp()
         {
             return new Random().Next(100000, 999999).ToString();
@@ -45,10 +44,8 @@ namespace UserService.Services
             await _db.Users.AddAsync(user);
             await _db.SaveChangesAsync();
 
-            // SEND OTP EMAIL
             await _email.SendEmail(email, "Verify Your Account", $"Your OTP is: <b>{otp}</b>");
 
-            // Publish event
             _publisher.PublishEvent("user.registered", new
             {
                 UserId = user.Id,
@@ -60,20 +57,6 @@ namespace UserService.Services
         }
 
         // ================ VERIFY SIGNUP OTP =================
-        //public async Task<bool> VerifyOtp(string email, string otp)
-        //{
-        //    var user = await _db.Users.SingleOrDefaultAsync(x => x.Email == email);
-
-        //    if (user == null || user.EmailOtp != otp || user.OtpExpiry < DateTime.UtcNow)
-        //        return false;
-
-        //    user.EmailOtp = null;
-        //    user.OtpExpiry = null;
-        //    user.IsVerified = true;
-        //    await _db.SaveChangesAsync();
-
-        //    return true;
-        //}
         public async Task<bool> VerifyOtp(string email, string otp)
         {
             var user = await _db.Users.SingleOrDefaultAsync(x => x.Email == email);
@@ -86,31 +69,17 @@ namespace UserService.Services
             user.IsVerified = true;
             await _db.SaveChangesAsync();
 
-            // Send Welcome Email 🎉
             await _email.SendEmail(
                 email,
                 "Welcome to E-Commerce App 🎉",
                 $@"
-        <div style='font-family: Arial; padding: 20px;'>
-            <h2 style='color:#4CAF50;'>Welcome, {user.FullName}! 🎉</h2>
-            <p>Thank you for joining <strong>E-Commerce App</strong>. Your account has been successfully verified.</p>
-
-            <p>You can now enjoy:</p>
-            <ul>
-                <li>✔ Fast product browsing</li>
-                <li>✔ Easy checkout</li>
-                <li>✔ Order tracking</li>
-                <li>✔ Exclusive member discounts</li>
-            </ul>
-
-            <p>We're excited to have you with us!</p>
-
-            <p style='margin-top:20px;'>Best Regards,<br/>
-            <strong>E-Commerce Team</strong></p>
-        </div>"
+                <div style='font-family: Arial; padding: 20px;'>
+                    <h2 style='color:#4CAF50;'>Welcome, {user.FullName}! 🎉</h2>
+                    <p>Your account has been successfully verified.</p>
+                    <p>We're excited to have you with us!</p>
+                </div>"
             );
 
-            // Optional: Publish Welcome Event
             _publisher.PublishEvent("user.welcome.sent", new
             {
                 UserId = user.Id,
@@ -122,12 +91,16 @@ namespace UserService.Services
             return true;
         }
 
-        // ================= SEND LOGIN OTP ==================
-        public async Task<bool> SendLoginOtp(string email)
+        // ================ REQUEST LOGIN OTP (Email + Password Required) =================
+        public async Task<bool> RequestLoginOtp(string email, string password)
         {
             var user = await _db.Users.SingleOrDefaultAsync(x => x.Email == email);
 
             if (user == null || !user.IsVerified)
+                return false;
+
+            // Validate password first
+            if (!BCrypt.Net.BCrypt.Verify(password, user.PasswordHash))
                 return false;
 
             var otp = GenerateOtp();
@@ -138,20 +111,42 @@ namespace UserService.Services
 
             await _email.SendEmail(email, "Login OTP", $"Your OTP is: <b>{otp}</b>");
 
+            _publisher.PublishEvent("user.login.otp.sent", new
+            {
+                Email = user.Email,
+                SentAt = DateTime.UtcNow
+            });
+
             return true;
         }
 
-        // ================= LOGIN WITH OTP ==================
-        public async Task<User?> ValidateLogin(string email, string otp)
+        // ================ LOGIN WITH PASSWORD + OTP =================
+        public async Task<User?> LoginWithOtp(string email, string password, string otp)
         {
             var user = await _db.Users.SingleOrDefaultAsync(x => x.Email == email);
 
-            if (user == null || user.EmailOtp != otp || user.OtpExpiry < DateTime.UtcNow)
+            if (user == null || !user.IsVerified)
                 return null;
 
+            // Check password
+            if (!BCrypt.Net.BCrypt.Verify(password, user.PasswordHash))
+                return null;
+
+            // Check OTP
+            if (user.EmailOtp != otp || user.OtpExpiry < DateTime.UtcNow)
+                return null;
+
+            // Clear OTP
             user.EmailOtp = null;
             user.OtpExpiry = null;
             await _db.SaveChangesAsync();
+
+            _publisher.PublishEvent("user.loggedin", new
+            {
+                UserId = user.Id,
+                Email = user.Email,
+                LoggedInAt = DateTime.UtcNow
+            });
 
             return user;
         }
@@ -186,7 +181,7 @@ namespace UserService.Services
             return true;
         }
 
-        // OPTIONAL FEATURE FOR PROFILE IMAGE
+        // ================= PROFILE IMAGE ==================
         public async Task<string?> UploadProfileImage(int userId, IFormFile file)
         {
             var user = await _db.Users.FindAsync(userId);
@@ -205,6 +200,36 @@ namespace UserService.Services
             await _db.SaveChangesAsync();
 
             return user.ProfileImageUrl;
+        }
+
+        // ================ RESEND SIGNUP OTP ==================
+        public async Task<bool> ResendOtp(string email)
+        {
+            var user = await _db.Users.SingleOrDefaultAsync(x => x.Email == email);
+
+            if (user == null) return false;
+            if (user.IsVerified) return false;
+
+            var otp = GenerateOtp();
+
+            user.EmailOtp = otp;
+            user.OtpExpiry = DateTime.UtcNow.AddMinutes(10);
+
+            await _db.SaveChangesAsync();
+
+            await _email.SendEmail(
+                email,
+                "Resend OTP",
+                $"Your OTP is: <b>{otp}</b>"
+            );
+
+            _publisher.PublishEvent("user.otp.resend", new
+            {
+                Email = email,
+                SentAt = DateTime.UtcNow
+            });
+
+            return true;
         }
     }
 }

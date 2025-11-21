@@ -21,7 +21,7 @@ namespace UserService.Controllers
             _publisher = publisher;
         }
 
-        // ========================= SIGN UP (Send OTP) =========================
+        // ========================= SIGN UP =========================
         [HttpPost("signup")]
         public async Task<IActionResult> Signup(RegisterDto dto)
         {
@@ -29,7 +29,6 @@ namespace UserService.Controllers
             {
                 var user = await _service.Register(dto.FullName, dto.Email, dto.Password);
 
-                // Publish RabbitMQ event
                 _publisher.PublishEvent("user.registered", new
                 {
                     UserId = user.Id,
@@ -46,7 +45,7 @@ namespace UserService.Controllers
             }
         }
 
-        // ===================== VERIFY ACCOUNT WITH OTP =======================
+        // ===================== VERIFY SIGNUP OTP =======================
         [HttpPost("verify-otp")]
         public async Task<IActionResult> VerifyOtp(string email, string otp)
         {
@@ -55,7 +54,6 @@ namespace UserService.Controllers
             if (!success)
                 return BadRequest("Invalid or expired OTP!");
 
-            // Publish Event
             _publisher.PublishEvent("user.verified", new
             {
                 Email = email,
@@ -65,35 +63,35 @@ namespace UserService.Controllers
             return Ok("Account verified successfully! You can now login.");
         }
 
-        // ===================== REQUEST OTP FOR LOGIN =========================
+        // ===================== REQUEST LOGIN OTP (Email + Password) =========================
         [HttpPost("request-login-otp")]
-        public async Task<IActionResult> RequestLoginOtp(string email)
+        public async Task<IActionResult> RequestLoginOtp(LoginOtpDto dto)
         {
-            var result = await _service.SendLoginOtp(email);
+            var result = await _service.RequestLoginOtp(dto.Email, dto.Password);
 
             if (!result)
-                return BadRequest("Account not found or not verified!");
+                return BadRequest("Invalid email or password, or user is not verified.");
 
             _publisher.PublishEvent("user.login.otp.sent", new
             {
-                Email = email,
+                Email = dto.Email,
                 SentAt = DateTime.UtcNow
             });
 
             return Ok("Login OTP sent to your email.");
         }
 
-        // ===================== LOGIN WITH OTP + JWT ==========================
+        // ===================== LOGIN WITH PASSWORD + OTP ==========================
         [HttpPost("login")]
-        public async Task<IActionResult> Login(string email, string otp)
+        public async Task<IActionResult> Login(LoginVerifyDto dto)
         {
-            var user = await _service.ValidateLogin(email, otp);
+            var user = await _service.LoginWithOtp(dto.Email, dto.Password, dto.Otp);
+
             if (user == null)
-                return Unauthorized("Invalid OTP or expired!");
+                return Unauthorized("Invalid email/password/OTP.");
 
             var token = _jwt.GenerateToken(user);
 
-            // Publish login event
             _publisher.PublishEvent("user.loggedin", new
             {
                 UserId = user.Id,
@@ -118,7 +116,7 @@ namespace UserService.Controllers
                 RequestedAt = DateTime.UtcNow
             });
 
-            return Ok("OTP sent to your email for password reset.");
+            return Ok("Password reset OTP sent to your email.");
         }
 
         // ========================= RESET PASSWORD =========================
@@ -150,5 +148,18 @@ namespace UserService.Controllers
 
             return Ok(new { Message = "Profile updated successfully!", ImageUrl = imageUrl });
         }
+
+        // ========================= RESEND SIGNUP OTP =====================
+        [HttpPost("resend-otp")]
+        public async Task<IActionResult> ResendOtp(string email)
+        {
+            var success = await _service.ResendOtp(email);
+
+            if (!success)
+                return BadRequest("Email not found or already verified.");
+
+            return Ok("A new OTP has been sent to your email.");
+        }
+
     }
 }
